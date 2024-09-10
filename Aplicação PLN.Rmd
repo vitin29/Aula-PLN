@@ -1,0 +1,255 @@
+---
+title: "Aplicação PNL"
+author: "Victor Antonio | Felipe Giacomini | Riquelme Pereira"
+date: "11-09-2024"
+output: html_document
+---
+
+# Aplicação
+
+Vamos fazer uma aplicação em R detalhada de Processamento de Linguagem Natural (PLN).
+
+## Objetivo
+
+O objetivo desta aplicação é coletar avaliações de um produto (no exemplo, um Iphone 15) em um site de e-commerce e realizar uma análise de sentimentos sobre as opiniões dos usuários.
+
+## Importação das Bibliotecas
+
+```{r,results='hide',warning=FALSE,message=FALSE}
+library("tidyr") # transformar e organizar dados
+library("tidytext") # Pré-processamento de texto
+library("stringr") # Manipulação de strings
+library("rvest") # Coletar dados de sites
+library("dplyr") # Manipulação de dados (filtros, contagens e agrupamentos)
+library("ggplot2") # Visualizações gráficas
+library("wordcloud") # Criar nuvens de palavras com as palavras mais frequentes
+library("reshape2") # Reestruturar dados para análise ou visualização
+library("RColorBrewer") # Paletas de cores para gráficos e visualizações
+library("tm") # Pré-processamento stopwords
+library("ptstem") # Stemming de palavras em português
+library("lexiconPT") # Léxicos em português para análise de sentimentos
+library("igraph") # Visualização de redes e grafos
+library("ggraph") # Complemento ao igraph
+```
+
+## Coletando Avaliações do Produto Usando *rvest*
+
+Aqui, vamos usar o *rvest* para coletar as avaliações do site de e-commerce da Amazon para o Iphone-15.
+
+```{r,cache=TRUE}
+# Função para coletar avaliações de uma página específica
+pega_avaliacoes <- function(page_number) {
+  url <- paste0("https://www.amazon.com.br/Apple-iPhone-15-128-GB/",
+                "product-reviews/B0CP6CVJSG/ref=cm_cr_getr_d_paging_btm_prev_1?",
+                "ie=UTF8&reviewerType=all_reviews&pageNumber=", page_number)
+  
+  webpagina <- read_html(url)
+  
+  # Extraindo as avaliações
+  avaliacoes <- webpagina %>%
+    html_nodes(".review-text") %>%
+    html_text()
+  
+  return(avaliacoes)
+}
+
+# número de paginas a ser coletadas
+numero_paginas <- 10
+
+# Coletar as avaliações de todas as páginas
+todas_avaliacoes <- lapply(1:numero_paginas, pega_avaliacoes)
+
+# Unir todas as listas de avaliações
+todas_avaliacoes <- unlist(todas_avaliacoes)
+
+# Visualizar as primeiras avaliações
+head(todas_avaliacoes,2)
+
+```
+
+Após a coleta dos nossos dados textuais vamos aplicar e mostrar a importância do Pré processamento de texto.
+
+## Pré-processamento das Avaliações
+
+### Convertendo para o formato *tidy*
+
+```{r,message=FALSE}
+# Convertendo as avaliações para um formato tidy
+avaliacoes_df <- data.frame(texto = todas_avaliacoes)
+
+# Tokenizando
+tidy_avaliacoes <- avaliacoes_df %>%
+  unnest_tokens(palavra, texto)
+
+# Visualizando as palavras mais frequentes
+
+tidy_avaliacoes %>%
+  count(palavra, sort = TRUE) %>% # Para ordenar a lista por frequência
+  mutate(palavra = reorder(palavra, n)) %>% # Manter a ordenação de frequência 
+  top_n(10) %>%
+  ggplot(aes(palavra, n)) + 
+  geom_col() + 
+  xlab(NULL) +
+  coord_flip() +
+  ggtitle("Palavras mais Frequentes") +
+  theme_minimal()
+```
+
+Como podemos perceber, temos muitas stopwords e acentuações que estão atrapalhando a nossa análise, por isso a importância do Pré-Processamento.
+
+Para isso, vamos aplicar primeiramente a Stemmização usando a biblioteca *ptstem.*
+
+### Stemmização
+
+```{r}
+tidy_avaliacoes$palavra <- ptstem(tidy_avaliacoes$palavra)
+```
+
+Após, vamos remover os acentos das palavras.
+
+### Removendo Acentos
+
+```{r}
+# Sequência de caracteres sem acentos
+p = c("a","e","i","o","u","a","e","i","o","u","a","e","i","o","u","a","o","c")
+# Sequência de caracteres com acentos
+names(p) = c("á","é","í","ó","ú","à","è","ì","ò","ù","â","ê","î","ô","û","ã",
+             "õ","ç")
+
+# removendo acentos
+tidy_avaliacoes <- tidy_avaliacoes %>%
+  mutate(palavra = str_replace_all(palavra, p))
+
+```
+
+Por fim, vamos remover as palavras pouco relevantes com o pacote *tm*.
+
+### Removendo stopwords
+
+```{r}
+tidy_avaliacoes <- tidy_avaliacoes %>% 
+  filter(!palavra %in% stopwords(kind = "pt"))
+```
+
+Após todo o Pré-Processamento das palavras vamos visualizar como está a visualização.
+
+### Visualização pós Pré-Processamento
+
+```{r,warning=FALSE,message=FALSE}
+# Visualizando as palavras mais frequentes
+
+tidy_avaliacoes %>%
+  count(palavra, sort = TRUE) %>% # Para ordenar a lista por frequência
+  mutate(palavra = reorder(palavra, n)) %>% # Manter a ordenação de frequência 
+  top_n(10) %>%
+  ggplot(aes(palavra, n)) + 
+  geom_col() + 
+  xlab(NULL) +
+  coord_flip() +
+  ggtitle("Palavras mais Frequentes") +
+  theme_minimal()
+```
+
+## Análise Descritiva das Avaliações
+Vamos agora realizar uma análise descritiva a fim de entender o comportamento dos nossos dados. Primeiramente vamos gerar uma nuvem de palavras.
+
+### Word Clouds
+
+```{r,warning=FALSE,message=FALSE}
+tidy_avaliacoes %>%
+  wordcloud()
+```
+
+Podemos ver na nuvem de palavras gerada das avaliações do iPhone 15 na Amazon pontos interessantes. A palavra "muitas" aparece em grande destaque, sugerindo que muitas avaliações mencionam a quantidade de algo, possivelmente "compras" ou características do "produto" ou "aparelho". Palavras como "excelente", "bom", e "perfeito" indicam uma tendência de avaliações positivas. Termos como "prazo", "rápido", e "certinho" sugerem que o processo de compra e entrega também é frequentemente comentado. O termo "bateria" pode estar relacionado a comentários sobre a duração do aparelho, enquanto "caixa" e "promoção" podem remeter à experiência de compra.
+
+### Análise de sentimentos
+
+Usando o léxico *oplexicon_v3.0* do pacote *lexiconPT* podemos adicionar polaridades positivas, negativas ou neutras as palavras presentes nas avaliações.
+
+```{r}
+sentimento <- oplexicon_v3.0 %>% select(term, polarity) %>%
+  rename(palavra=term)
+
+tidy_avaliacoes_palavras <- distinct(tidy_avaliacoes) %>%
+  left_join(sentimento, by="palavra")
+
+tidy_avaliacoes_palavras %>%
+  summarize(sentimento=mean(polarity, na.rm=T))
+
+```
+
+Uma polaridade média de 0.17 indica que as avaliações no geral são positivas.
+
+## N-Grams
+
+Podemos não só trabalhar com palavras únicas, mas dividir o texto em várias formas. Por exemplo, podemos identificar pares de palavras - cada vez que um par de palavras - 'iphone 15' - aparecem juntos. Isso se chama um 'bigram'. A lógica de processamento é bem parecida com a rotina para palavras únicas.
+
+### Tokenizando em Bi-grams
+
+```{r}
+tidy_avaliacoes_bigram <- avaliacoes_df %>% unnest_tokens(bigram, texto,
+                                       token="ngrams", n=2)
+head(tidy_avaliacoes_bigram)
+```
+
+### Pré-processamento dos Bi-gram
+O pré processamento é muito parecido com o caso de unigram(palavra), o que fica um pouco mais complexo é a questão das stopwords.
+```{r}
+tidy_avaliacoes_bigram <- tidy_avaliacoes_bigram %>%
+  separate(bigram, c("palavra1","palavra2"), sep = " ") %>% # Separando as words
+  mutate(palavra1 = ptstem(palavra1),
+         palavra2 = ptstem(palavra2)) %>% # Stemizando
+  mutate(palavra1 = str_replace_all(palavra1, p),
+         palavra2 = str_replace_all(palavra2, p)) %>% # Removendo Acentos
+  filter(!palavra1 %in% stopwords(kind = "pt")) %>% # Removendo stopwords
+  filter(!palavra2 %in% stopwords(kind = "pt")) %>% # Removendo stopwords
+  mutate(bigram = paste(palavra1,palavra2,sep = " ")) %>% 
+  select(bigram)
+
+head(tidy_avaliacoes_bigram)
+```
+Podemos perceber que após a remoção das stopwords, *bi-grams* como "rápido com" e "excelente nas" sumiram, o que faz sentido, porém "com qualidade" também sumiu, um *bi-gram* que apesar de possuir uma stopword("com") talvez faria sentido na análise.
+
+### Análise Descritiva dos Bi-Grams
+
+```{r,message=FALSE}
+# Visualizando as palavras mais frequentes
+
+tidy_avaliacoes_bigram %>%
+  count(bigram, sort = TRUE) %>% # Para ordenar a lista por frequência
+  mutate(bigram = reorder(bigram, n)) %>% # Manter a ordenação de frequência 
+  top_n(10) %>%
+  ggplot(aes(bigram, n)) + 
+  geom_col() + 
+  xlab(NULL) +
+  coord_flip() +
+  ggtitle("Bi-grams mais Frequentes") +
+  theme_minimal()
+```
+
+Podemos perceber nos *bi-grams* mais frequentes, como "prime day" e relacionados a entrega como "super rapido" mostrando uma qualidade do e-commerce analisado, bem como "muitas bom", "muitas bem", "muitas bonitinho" relacionados positivamente ao produto analisado.
+
+### Rede de Bigramas
+
+O método anterior é interessante para visualizar os bigramas mais frequentes, mas seria interessante poder ter uma visão mais ampla destas relações entre palavras. A seguir, vemos como podemos ter essa visão geral usando uma rede de palavras com os pacotes *igraph* e *ggraph.*
+
+```{r}
+tidy_avaliacoes_bigram  %>%
+  separate(bigram,c("palavra1","palavra2"),sep = " ") %>% 
+  count(palavra1,palavra2,sort = T) %>% 
+  filter(n > 2) %>% # Filtrando bigramas que aparecem mais do que 2 vezes, pelo menos.
+  graph_from_data_frame() %>% # Gera as relações direcionais entre palavras.
+  ggraph(layout = "fr") +
+  geom_edge_link(alpha = 0.5) + # Alpha para adicionar transparência as retas.
+  geom_node_point(color = "lightblue", 
+                  size = 3, alpha = 0.5) + # Definindo cor e tamanho dos pontos.
+  geom_node_text(aes(label = name), 
+                 vjust = 1, hjust = 1) + # vjust, hjust para deslocar os textos.
+  theme_void() # Remover eixos e cor do fundo.
+```
+
+A rede de bigramas gerada nos permite visualizar as palavras que frequentemente aparecem juntas nas avaliações do iPhone 15, fornecendo uma visão mais ampla das conexões entre os termos. É possível observar padrões de satisfação relacionados à entrega ("chegou", "certinho", "entrega"), além de termos de elogio como "lindo", "bonitinho", "embalagem" que sugerem comentários sobre a aparência e a apresentação do produto.
+
+## Conclusão
+
+A análise de Processamento de Linguagem Natural (PLN) aplicada nas avaliações do iPhone 15 proporcionou valiosas percepções sobre as opniões dos usuários. O pré-processamento do texto, incluindo a remoção de stopwords, acentuação e stemização, permitiu identificar os termos mais recorrentes, como "produto", "entrega" e "excelente", indicando um predomínio de avaliações positivas. A análise de sentimentos, com o uso do léxico *OpLexicon*, apontou para uma polaridade positiva nas avaliações, mostrando uma satisfação dos compradores deste produto. Por fim, a visualização de bi-gramas revelou conexões relevantes entre palavras, destacando temas centrais como a qualidade do produto e a ótima experiência de compra do ecommerce.
